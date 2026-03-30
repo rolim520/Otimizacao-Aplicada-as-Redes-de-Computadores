@@ -130,7 +130,7 @@ def plot_gap_objetivo(sizes, diferencas):
 def main():
     #Problem sizes to test: number of items
     #sizes = [10, 1000, 10000, 100000, 1000000, 10000000]
-    sizes = [10, 100, 1000, 10000, 100000]
+    sizes = [10, 100, 1000, 10000, 100000, 1000000]
     max_weight = 50
     max_value = 100
     gap_thresholds = [0.4, 0.2, 0.1, 0.05, 0.02, 0]
