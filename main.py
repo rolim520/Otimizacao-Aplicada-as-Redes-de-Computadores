@@ -1,9 +1,3 @@
-"""
-Calculo do tempo de execucao de um problema da mochila
-Aluno: Guilherme Oliveira Rolim Silva
-Implementação original com solver PuLP: Rodrigo de Souza Couto - GTA/PEE/COPPE/UFRJ
-"""
-
 import time as tm
 import random
 import math
@@ -49,26 +43,19 @@ def algoritmo_guloso(items, capacity):
     solve_time = tm.time() - start_time
     return total_value, solve_time
 
-def obter_vizinho(mochila, items, capacity, peso_atual, valor_atual):
-    vizinho = mochila.copy()
-    
+def obter_movimento(mochila, items, capacity, peso_atual, valor_atual):
+
     while True:
-        indice = random.randint(0, len(vizinho) - 1)
+        indice = random.randint(0, len(mochila) - 1)
         
-        if vizinho[indice] == 1:
-            vizinho[indice] = 0
-            novo_peso = peso_atual - items[indice][1] 
-            novo_valor = valor_atual - items[indice][2]
-            return vizinho, novo_peso, novo_valor
-            
+        if mochila[indice] == 1:
+            # Informa: (índice alterado, novo bit, novo peso, novo valor)
+            return indice, 0, peso_atual - items[indice][1], valor_atual - items[indice][2]
         else:
             if peso_atual + items[indice][1] <= capacity:
-                vizinho[indice] = 1
-                novo_peso = peso_atual + items[indice][1]
-                novo_valor = valor_atual + items[indice][2]
-                return vizinho, novo_peso, novo_valor
+                return indice, 1, peso_atual + items[indice][1], valor_atual + items[indice][2]
 
-def simulated_annealing(items, capacity, taxa_de_resfriamento=0.98, temp_inicial=1000, temp_final=1, max_iter=200):
+def simulated_annealing(items, capacity, taxa_de_resfriamento=0.98, temp_inicial=1000, temp_final=1, max_iter=500):
     start_time = tm.time()
     mochila_atual = [0] * len(items)
     peso_atual = 0
@@ -79,20 +66,27 @@ def simulated_annealing(items, capacity, taxa_de_resfriamento=0.98, temp_inicial
 
     while temperatura > temp_final:
         for _ in range(max_iter):
-            vizinho, peso_vizinho, valor_vizinho = obter_vizinho(mochila_atual, items, capacity, peso_atual, valor_atual)
+            # Pega apenas a instrução do que mudar, sem copiar listas na memória!
+            indice, novo_bit, peso_vizinho, valor_vizinho = obter_movimento(mochila_atual, items, capacity, peso_atual, valor_atual)
+            
             delta = valor_vizinho - valor_atual
 
+            # Variável de controle para saber se vamos efetivar a mudança na lista
+            aceitou = False
+            
             if delta > 0:
-                mochila_atual = vizinho
-                peso_atual = peso_vizinho
-                valor_atual = valor_vizinho
-                if valor_atual > melhor_valor:
-                    melhor_valor = valor_atual
+                aceitou = True
+                if valor_vizinho > melhor_valor:
+                    melhor_valor = valor_vizinho
             else:
                 if random.random() < math.exp(delta / temperatura):
-                    mochila_atual = vizinho
-                    peso_atual = peso_vizinho
-                    valor_atual = valor_vizinho
+                    aceitou = True
+            
+            # Se a jogada foi aceita, nós alteramos O ÚNICO BIT na lista original!
+            if aceitou:
+                mochila_atual[indice] = novo_bit
+                peso_atual = peso_vizinho
+                valor_atual = valor_vizinho
 
         temperatura *= taxa_de_resfriamento
 
@@ -100,15 +94,21 @@ def simulated_annealing(items, capacity, taxa_de_resfriamento=0.98, temp_inicial
     return melhor_valor, solve_time
 
 def generate_random_items(num_items, max_weight, max_value):
-    return [(i, random.randint(1, max_weight), random.randint(1, max_value)) for i in range(num_items)]
+    items = []
+    for i in range(num_items):
+        weight = random.randint(1, max_weight)
+        value = weight + random.randint(1, 10) 
+        items.append((i, weight, value))
+    return items
 
 def run_multiple_times(solver_func, items, capacity, num_runs, **kwargs):
     times = []
     objetivos = []
-    for _ in range(num_runs):
+    for i in range(num_runs):
         obj_val, solve_time = solver_func(items, capacity, **kwargs)
         times.append(solve_time)
         objetivos.append(obj_val)
+        print("iteração", i)
     return np.mean(times), np.std(times), np.mean(objetivos)
 
 # Gráfico 1: Linhas exclusivas para os Gaps do PuLP
@@ -137,7 +137,7 @@ def plot_partial_results(results, sizes, num_runs, confidence=0.95):
     plt.savefig('knapsack_execution_time_pulp_only.png')
     plt.close()
 
-# Gráfico 2: Barras Agrupadas de Tempo (Padrão UC)
+# Gráfico 2: Barras Agrupadas de Tempo (Escala Log)
 def plot_barras_tempo(results, sizes):
     x = np.arange(len(sizes))
     width = 0.25
@@ -146,61 +146,84 @@ def plot_barras_tempo(results, sizes):
 
     tempos_guloso = [results['Guloso'][i][1] for i in range(len(sizes))]
     tempos_sa = [results['SA'][i][1] for i in range(len(sizes))]
-    tempos_pulp = [results[0][i][1] for i in range(len(sizes))] # Gap 0
+    tempos_pulp = [results[0][i][1] for i in range(len(sizes))] 
+
+    # Adicionando um valor ínfimo para não bugar o log(0)
+    tempos_guloso = [max(t, 1e-4) for t in tempos_guloso] 
 
     rects1 = ax.bar(x - width, tempos_guloso, width, label='Guloso', color='#8c8c8c')
     rects2 = ax.bar(x, tempos_sa, width, label='Simulated Annealing', color='#e6a573')
     rects3 = ax.bar(x + width, tempos_pulp, width, label='PuLP (Ótimo)', color='#2d8c7c')
 
-    ax.set_ylabel('Tempo Médio (segundos)')
+    # A MÁGICA: Escala logarítmica no eixo Y
+    ax.set_yscale('log')
+    
+    ax.set_ylabel('Tempo Médio (segundos - Escala Log)')
     ax.set_xlabel('Tamanho do Problema (Número de Itens)')
     ax.set_title('Comparativo de Desempenho: Tempo Médio de Execução')
     ax.set_xticks(x)
     ax.set_xticklabels(sizes)
-    ax.grid(axis='y', linestyle='-', alpha=0.5)
-    ax.legend()
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
+    ax.legend(loc='upper left')
 
     ax.bar_label(rects1, fmt='%.3f', padding=3, rotation=90, size=8)
     ax.bar_label(rects2, fmt='%.3f', padding=3, rotation=90, size=8)
     ax.bar_label(rects3, fmt='%.3f', padding=3, rotation=90, size=8)
 
+    # Aumentando a margem superior para o texto não cortar no topo
+    ax.set_ylim(top=max(max(tempos_pulp), max(tempos_sa)) * 5) 
+
     fig.tight_layout()
     plt.savefig('comparativo_barras_tempo.png')
     plt.close()
 
-# Gráfico 3: Barras Agrupadas de Erro/Gap (Padrão UC)
+# Gráfico 3: Barras Agrupadas de Erro/Gap (Escala Log)
 def plot_barras_gap(sizes, gaps_guloso, gaps_sa):
     x = np.arange(len(sizes))
     width = 0.35
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
-    rects1 = ax.bar(x - width/2, gaps_guloso, width, label='Guloso', color='#8c8c8c')
-    rects2 = ax.bar(x + width/2, gaps_sa, width, label='Simulated Annealing', color='#e6a573')
-    # O PuLP não entra aqui pois o Gap dele para o ótimo é, por definição, 0%.
+    # Adicionando um valor ínfimo para não bugar o log(0)
+    gaps_guloso_plot = [max(g, 1e-3) for g in gaps_guloso]
+    gaps_sa_plot = [max(g, 1e-3) for g in gaps_sa]
 
-    ax.set_ylabel('Gap Médio em relação ao Ótimo (%)')
+    rects1 = ax.bar(x - width/2, gaps_guloso_plot, width, label='Guloso', color='#8c8c8c')
+    rects2 = ax.bar(x + width/2, gaps_sa_plot, width, label='Simulated Annealing', color='#e6a573')
+
+    # A MÁGICA: Escala logarítmica no eixo Y
+    ax.set_yscale('log')
+
+    ax.set_ylabel('Gap Médio em relação ao Ótimo (% - Escala Log)')
     ax.set_xlabel('Tamanho do Problema (Número de Itens)')
     ax.set_title('Comparativo de Qualidade: Gap Médio por Tamanho')
     ax.set_xticks(x)
     ax.set_xticklabels(sizes)
-    ax.grid(axis='y', linestyle='-', alpha=0.5)
-    ax.legend()
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
+    ax.legend(loc='upper left')
 
-    ax.bar_label(rects1, fmt='%.2f', padding=3, size=9)
-    ax.bar_label(rects2, fmt='%.2f', padding=3, size=9)
+    # Para a anotação, usamos o valor original para ficar bonito no texto (ex: 0.00 ao invés de 0.001)
+    ax.bar_label(rects1, labels=[f'{g:.2f}' for g in gaps_guloso], padding=3, size=9)
+    ax.bar_label(rects2, labels=[f'{g:.2f}' for g in gaps_sa], padding=3, size=9)
+
+    ax.set_ylim(bottom=1e-3, top=max(gaps_sa) * 5) 
 
     fig.tight_layout()
     plt.savefig('comparativo_barras_gap.png')
     plt.close()
 
 def main():
-    # ATENÇÃO: Tamanhos a partir de 100.000 podem demorar muitas horas para o PuLP Gap 0.
-    sizes = [100, 1000, 10000, 100000, 1000000]
-    max_weight = 50
+    random.seed(46)
+    # Tamanhos ideais para a apresentação
+    sizes = [100, 1000, 10000, 100000]
+    max_weight = 10000
     max_value = 100
-    gap_thresholds = [0.4, 0.2, 0.1, 0.05, 0.02, 0]
-    num_runs = 10
+    
+    # Gaps reduzidos conforme solicitado
+    gap_thresholds = [0.4, 0.1, 0.02, 0]
+    
+    # Alterado para apenas 5 execuções de média
+    num_runs = 5 
     
     results = {gap: [] for gap in gap_thresholds}
     results['Guloso'] = []
@@ -234,12 +257,36 @@ def main():
         diferenca_guloso = ((obj_otimo_pulp - obj_guloso) / obj_otimo_pulp) * 100
         diferenca_sa = ((obj_otimo_pulp - obj_sa) / obj_otimo_pulp) * 100
         
-        print(f"-> Gap Resultante: Guloso {diferenca_guloso:.2f}% | SA {diferenca_sa:.2f}%")
-        
         lista_diferencas_guloso.append(diferenca_guloso)
         lista_diferencas_sa.append(diferenca_sa)
 
-    # Gera os 3 gráficos solicitados
+    # =========================================================================
+    # TABELA IMPRESSA NO TERMINAL
+    # =========================================================================
+    print("\n" + "="*75)
+    print(f"RESUMO DOS RESULTADOS (MÉDIA DE {num_runs} EXECUÇÕES)")
+    print("="*75)
+    print(f"{'Tamanho':<10} | {'Método':<20} | {'Tempo Médio (s)':<15} | {'Gap (%)':<10}")
+    print("-" * 75)
+
+    for i, size in enumerate(sizes):
+        # Pegando os tempos das listas
+        tempo_pulp = results[0][i][1]
+        tempo_guloso = results['Guloso'][i][1]
+        tempo_sa = results['SA'][i][1]
+
+        # Pegando os gaps
+        gap_pulp = 0.00  # Por definição, a base do PuLP é 0
+        gap_guloso = lista_diferencas_guloso[i]
+        gap_sa = lista_diferencas_sa[i]
+
+        print(f"{size:<10} | {'PuLP (Ótimo)':<20} | {tempo_pulp:<15.4f} | {gap_pulp:<10.2f}")
+        print(f"{size:<10} | {'Guloso':<20} | {tempo_guloso:<15.4f} | {gap_guloso:<10.2f}")
+        print(f"{size:<10} | {'Simulated Annealing':<20} | {tempo_sa:<15.4f} | {gap_sa:<10.2f}")
+        print("-" * 75)
+    # =========================================================================
+
+    # Plota os gráficos com as funções que atualizamos
     plot_partial_results(results, sizes, num_runs)
     plot_barras_tempo(results, sizes)
     plot_barras_gap(sizes, lista_diferencas_guloso, lista_diferencas_sa)
